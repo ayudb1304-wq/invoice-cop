@@ -5,10 +5,11 @@ import { useState } from "react";
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
-  const supabase = createClient();
 
   async function signInWithGoogle() {
     setLoading(true);
+    // Create client only on user action so static prerender / build does not require Supabase env.
+    const supabase = createClient();
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
