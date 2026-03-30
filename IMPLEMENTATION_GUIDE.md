@@ -19,7 +19,7 @@ This section summarizes what exists in the repo **today** so you do not have to 
 | **DB helpers** | `lib/db/invoices.ts` (invoices, sequences, jobs, events), `templates.ts`, `dashboard.ts` — not split into `sequences.ts` / `jobs.ts` |
 | **Email** | `lib/email/send.ts`, `templates.ts`, `unsubscribe.ts` |
 | **Scheduler** | `lib/scheduler/process.ts` (`processReminders`, `updateInvoiceStatuses`) |
-| **Cron** | `vercel.json` → `/api/cron/process-reminders` (15 min), `/api/cron/update-invoice-statuses` (daily) |
+| **Cron** | **Vercel Hobby:** `vercel.json` runs **daily** `/api/cron/update-invoice-statuses`. Reminder processing runs via **GitHub Actions schedule** calling `/api/cron/process-reminders` every 15 minutes. |
 | **Webhooks** | `app/api/webhooks/resend/route.ts`, `app/api/webhooks/lemonsqueezy/route.ts` (Lemon Squeezy subscriptions) |
 | **Types** | `types/database.ts` (checked in) |
 | **UI** | shadcn-style components under `components/ui/`; charts use **recharts** (`components/ui/chart.tsx`) |
@@ -736,7 +736,7 @@ Reply-To pattern: reply+{invoice_id}@{app hostname}
 ## Phase 7 — Background Job Worker (Vercel Cron)
 
 ### Goals
-- Cron runs every 15 minutes (requires Vercel Pro)
+- Process reminders on a schedule (15 minutes ideal)
 - Finds all pending jobs due ≤ now, sends emails
 - Idempotent: concurrent runs can't double-send
 - Updates job status and logs results
@@ -746,7 +746,9 @@ Reply-To pattern: reply+{invoice_id}@{app hostname}
 ```
 [x] 7.1  Create app/api/cron/process-reminders/route.ts
 [x] 7.2  Protect endpoint with CRON_SECRET header check
-[x] 7.3  Add vercel.json cron configuration (every 15 min + daily status job)
+[~] 7.3  Scheduling setup:
+         - Vercel Hobby supports **daily** cron only → keep `/api/cron/update-invoice-statuses` daily in `vercel.json`
+         - Use GitHub Actions schedule to hit `/api/cron/process-reminders` every 15 minutes
 [x] 7.4  Build lib/scheduler/process.ts — core dispatch logic
 [x] 7.5  Atomic lock: `pending` → `sending` via conditional update (schema includes `sending`)
 [x] 7.6  Daily status-update job: update invoice.status (`updateInvoiceStatuses`)
@@ -760,16 +762,24 @@ Reply-To pattern: reply+{invoice_id}@{app hostname}
 {
   "crons": [
     {
-      "path": "/api/cron/process-reminders",
-      "schedule": "*/15 * * * *"
-    },
-    {
       "path": "/api/cron/update-invoice-statuses",
       "schedule": "0 0 * * *"
     }
   ]
 }
 ```
+
+### GitHub Actions scheduler (Hobby-friendly)
+
+The repo includes `.github/workflows/process-reminders-cron.yml`, which runs every 15 minutes and calls:
+
+- `GET {APP_URL}/api/cron/process-reminders`
+- Header: `Authorization: Bearer {CRON_SECRET}`
+
+Set these repo secrets:
+
+- `APP_URL` (your deployed app base URL, no trailing slash)
+- `CRON_SECRET` (same value as the Vercel env var)
 
 ### Cron handler core logic
 
