@@ -1,6 +1,13 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+/** Lazy init so `next build` does not require RESEND_API_KEY when this module is imported via cron/scheduler. */
+function getResend(): Resend {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    throw new Error("RESEND_API_KEY is not set");
+  }
+  return new Resend(key);
+}
 
 export interface SendReminderOptions {
   to: string;
@@ -23,7 +30,7 @@ export async function sendReminderEmail({
   // Per-invoice reply-to address for inbound reply detection
   const replyTo = `reply+${invoiceId}@${new URL(appUrl).hostname}`;
 
-  const result = await resend.emails.send({
+  const result = await getResend().emails.send({
     from: `InvoiceCop <${fromEmail}>`,
     to,
     replyTo: replyTo,
