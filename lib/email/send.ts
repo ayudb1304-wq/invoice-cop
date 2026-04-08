@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { appendReminderEmailFooter } from "@/lib/email/footer";
 
 /** Lazy init so `next build` does not require RESEND_API_KEY when this module is imported via cron/scheduler. */
 function getResend(): Resend {
@@ -29,13 +30,15 @@ export async function sendReminderEmail({
 
   // Per-invoice reply-to address for inbound reply detection
   const replyTo = `reply+${invoiceId}@${new URL(appUrl).hostname}`;
+  const unsubscribeUrl = `${appUrl}/api/unsubscribe?token=${replyToToken}&invoice_id=${invoiceId}`;
+  const textBody = appendReminderEmailFooter(body, unsubscribeUrl);
 
   const result = await getResend().emails.send({
     from: `InvoiceCop <${fromEmail}>`,
     to,
     replyTo: replyTo,
     subject,
-    text: `${body}\n\n---\nTo stop receiving reminders for this invoice: ${appUrl}/api/unsubscribe?token=${replyToToken}`,
+    text: textBody,
     headers: {
       "X-Invoice-ID": invoiceId,
     },

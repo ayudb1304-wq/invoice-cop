@@ -32,7 +32,7 @@ export function buildTemplateVars(invoice: Invoice, unsubscribeToken: string): T
     payment_link: invoice.payment_link_url ?? "(payment link not set)",
     sender_name: "InvoiceCop",
     days_overdue: "0",
-    unsubscribe_link: `${appUrl}/api/unsubscribe?token=${unsubscribeToken}`,
+    unsubscribe_link: `${appUrl}/api/unsubscribe?token=${unsubscribeToken}&invoice_id=${invoice.id}`,
   };
 }
 

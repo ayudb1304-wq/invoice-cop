@@ -86,7 +86,18 @@ export function TemplateEditor({ template, stage, onClose }: Props) {
         }),
       });
       if (!res.ok) {
-        toast.error("Failed to save template");
+        const errBody = (await res.json()) as {
+          error?: string | Record<string, string[]>;
+        };
+        const e = errBody.error;
+        if (e && typeof e === "object") {
+          const flat = Object.values(e)
+            .flat()
+            .filter(Boolean);
+          toast.error(flat.length ? flat.join(". ") : "Failed to save template");
+        } else {
+          toast.error(typeof e === "string" ? e : "Failed to save template");
+        }
         return;
       }
       toast.success(isEdit ? "Template updated" : "Template created");

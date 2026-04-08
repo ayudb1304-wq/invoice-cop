@@ -1,5 +1,5 @@
 import { createClient } from "@/utils/supabase/server";
-import { buildLemonSqueezyCheckoutUrl } from "@/lib/billing/checkout-url";
+import { getDodoCheckoutConfig } from "@/lib/billing/dodo-config";
 import Link from "next/link";
 import { ExternalLinkIcon } from "lucide-react";
 
@@ -22,12 +22,12 @@ export default async function SettingsPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("subscription_status, trial_ends_at, lemon_squeezy_subscription_id")
+    .select("subscription_status, trial_ends_at, dodo_subscription_id")
     .eq("id", user.id)
     .single();
 
   const status = profile?.subscription_status ?? "trialing";
-  const checkoutUrl = buildLemonSqueezyCheckoutUrl(user.id);
+  const dodoConfigured = getDodoCheckoutConfig() !== null;
   const trialEnds = profile?.trial_ends_at
     ? new Date(profile.trial_ends_at).toLocaleDateString(undefined, {
         dateStyle: "medium",
@@ -59,19 +59,19 @@ export default async function SettingsPage() {
               <dd className="font-medium">{trialEnds}</dd>
             </div>
           )}
-          {profile?.lemon_squeezy_subscription_id && (
+          {profile?.dodo_subscription_id && (
             <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">Lemon Squeezy</dt>
+              <dt className="text-muted-foreground">Dodo</dt>
               <dd className="font-mono text-xs">
-                …{profile.lemon_squeezy_subscription_id.slice(-8)}
+                …{profile.dodo_subscription_id.slice(-8)}
               </dd>
             </div>
           )}
         </dl>
 
-        {checkoutUrl && needsSubscription && (
+        {dodoConfigured && needsSubscription && (
           <a
-            href={checkoutUrl}
+            href="/api/billing/dodo-checkout"
             className="bg-foreground text-background mt-4 inline-flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-opacity hover:opacity-90"
           >
             Subscribe or manage plan
@@ -79,27 +79,45 @@ export default async function SettingsPage() {
           </a>
         )}
 
-        {!checkoutUrl && (
+        {!dodoConfigured && (
           <p className="text-muted-foreground mt-4 text-sm">
             Set{" "}
             <code className="bg-muted rounded px-1 py-0.5 text-xs">
-              NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL
+              DODO_PAYMENTS_API_KEY
+            </code>
+            ,{" "}
+            <code className="bg-muted rounded px-1 py-0.5 text-xs">
+              DODO_PAYMENTS_SUBSCRIPTION_PRODUCT_ID
+            </code>
+            , and{" "}
+            <code className="bg-muted rounded px-1 py-0.5 text-xs">
+              NEXT_PUBLIC_APP_URL
             </code>{" "}
-            in your environment to enable checkout (your Lemon Squeezy product checkout link).
+            to enable checkout.
           </p>
         )}
 
         <p className="text-muted-foreground mt-4 text-xs leading-relaxed">
-          Payments are processed by Lemon Squeezy. We receive your user ID after checkout via
-          webhook so your account can stay in sync.{" "}
+          Payments are processed by{" "}
           <Link
-            href="https://docs.lemonsqueezy.com/help/checkout/passing-custom-data"
+            href="https://dodopayments.com"
             className="text-foreground underline underline-offset-2"
             target="_blank"
             rel="noopener noreferrer"
           >
-            Custom checkout data
+            Dodo Payments
           </Link>
+          . We attach your user id to the checkout session metadata so webhooks can update your
+          account. See the{" "}
+          <Link
+            href="https://docs.dodopayments.com/api-reference/subscription-integration-guide"
+            className="text-foreground underline underline-offset-2"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            subscription integration guide
+          </Link>
+          .
         </p>
       </section>
     </div>

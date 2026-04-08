@@ -1,7 +1,7 @@
 # InvoiceCop – Phase-wise Implementation Guide
 
 > **Product:** InvoiceCop
-> **Stack:** Next.js 16 · TypeScript · shadcn/ui · Tailwind v4 · Supabase · Resend · Claude API · Lemon Squeezy · Vercel
+> **Stack:** Next.js 16 · TypeScript · shadcn/ui · Tailwind v4 · Supabase · Resend · Claude API · Dodo Payments · Vercel
 > **Last updated:** 2026-03-30
 > **Status legend:** `[ ]` todo · `[x]` done · `[~]` partial / in progress
 
@@ -20,11 +20,11 @@ This section summarizes what exists in the repo **today** so you do not have to 
 | **Email** | `lib/email/send.ts`, `templates.ts`, `unsubscribe.ts` |
 | **Scheduler** | `lib/scheduler/process.ts` (`processReminders`, `updateInvoiceStatuses`) |
 | **Cron** | **Vercel Hobby:** `vercel.json` runs **daily** `/api/cron/update-invoice-statuses`. Reminder processing runs via **GitHub Actions schedule** calling `/api/cron/process-reminders` every 15 minutes. |
-| **Webhooks** | `app/api/webhooks/resend/route.ts`, `app/api/webhooks/lemonsqueezy/route.ts` (Lemon Squeezy subscriptions) |
+| **Webhooks** | `app/api/webhooks/resend/route.ts`, `app/api/webhooks/dodo/route.ts` (Dodo Payments subscriptions) |
 | **Types** | `types/database.ts` (checked in) |
 | **UI** | shadcn-style components under `components/ui/`; charts use **recharts** (`components/ui/chart.tsx`) |
 | **Marketing** | `app/(marketing)/page.tsx`, `privacy`, `terms`; `app/sitemap.ts`, `app/robots.ts` |
-| **Not present yet** | `public/og.png` (`public/` exists with `.gitkeep` only), dedicated `not-found.tsx` — **Settings + LS checkout** exist at `app/(app)/settings/page.tsx` |
+| **Not present yet** | `public/og.png` (`public/` exists with `.gitkeep` only) — **Settings + Dodo checkout** at `app/(app)/settings/page.tsx`; `app/not-found.tsx` for 404 |
 
 **Known gaps vs original spec:** Per-invoice template pick per stage is **not** in the UI — `getTemplate()` resolves the user’s custom template for that stage or falls back to the system default. Reminder stages are configurable **on invoice create only**; changing `due_date` does not yet regenerate pending jobs. AI rewrite tones in the UI are **friendly / neutral / firm** (not casual/professional/firm). AI rate limiting is **in-memory** in `app/api/ai/rewrite/route.ts` (resets on cold start; not persisted in Supabase).
 
@@ -43,9 +43,9 @@ This section summarizes what exists in the repo **today** so you do not have to 
 | 6 | Email Engine | Resend sending, inbound webhook, pause/stop logic | 3 days | ✅ done |
 | 7 | Background Job Worker | Vercel Cron, idempotent dispatch, retries | 2 days | ✅ done |
 | 8 | AI Rewrite Feature | Claude API tone rewriting endpoint + UI | 1–2 days | ✅ done |
-| 9 | Billing (Lemon Squeezy) | Checkout link + webhook sync + settings | 2–3 days | ✅ core done (configure store + env in prod) |
+| 9 | Billing (Dodo Payments) | Checkout session + webhook sync + settings | 2–3 days | ✅ core done (configure Dodo + env in prod) |
 | 10 | Dashboard & Reporting | Aggregate tiles, activity log, filters | 2 days | ✅ done |
-| 11 | Polish, Security & Launch | Error states, SPF/DKIM, security audit, deploy | 2–3 days | ⬜ mostly not started (privacy/terms exist) |
+| 11 | Polish, Security & Launch | Error states, SPF/DKIM, security audit, deploy | 2–3 days | ✅ code done (DNS / Lighthouse / manual smoke in ops checklist) |
 
 **Total estimated effort:** ~25–30 days solo developer
 
@@ -114,7 +114,7 @@ app/
     templates/
       page.tsx
     settings/
-      page.tsx              # Billing / Lemon Squeezy checkout
+      page.tsx              # Billing / Dodo Payments checkout link
   auth/
     callback/route.ts       # Supabase OAuth callback
     login/page.tsx
@@ -126,9 +126,11 @@ app/
     templates/[id]/route.ts
     ai/rewrite/route.ts
     unsubscribe/route.ts    # GET — token + invoice_id query params
+    billing/
+      dodo-checkout/route.ts  # Redirect to Dodo hosted checkout (creates session server-side)
     webhooks/
       resend/route.ts       # Inbound email webhook
-      lemonsqueezy/route.ts # Lemon Squeezy subscription webhooks
+      dodo/route.ts         # Dodo Payments subscription webhooks
     cron/
       process-reminders/route.ts
       update-invoice-statuses/route.ts
@@ -142,8 +144,8 @@ utils/
 lib/
   utils.ts                  # cn() — clsx + tailwind-merge
   billing/
-    lemon-squeezy.ts        # Webhook verify, status mapping, profile sync
-    checkout-url.ts         # Checkout URL + checkout[custom][user_id]
+    dodo.ts                 # Map Dodo subscription → profile; sync helpers
+    dodo-config.ts          # Env check for checkout session creation
   db/
     invoices.ts             # Invoices, sequences, jobs, events
     templates.ts
@@ -175,13 +177,20 @@ FROM_EMAIL=reminders@yourdomain.com
 # Anthropic
 ANTHROPIC_API_KEY=                        # From console.anthropic.com
 
-# Lemon Squeezy (billing)
-NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL=      # Full checkout link: https://YOURSTORE.lemonsqueezy.com/checkout/buy/VARIANT_ID
-LEMONSQUEEZY_WEBHOOK_SECRET=                # Signing secret from Settings → Webhooks
+# Dodo Payments (billing) — see https://docs.dodopayments.com/
+DODO_PAYMENTS_API_KEY=                    # Dashboard API key
+DODO_PAYMENTS_WEBHOOK_KEY=                # Webhook signing secret (Standard Webhooks)
+DODO_PAYMENTS_ENVIRONMENT=test_mode       # or live_mode
+DODO_PAYMENTS_SUBSCRIPTION_PRODUCT_ID=    # Subscription product id from Dodo dashboard
+DODO_TRIAL_PERIOD_DAYS=14                 # Optional; 0 = no trial override in checkout session
 
 # App
 NEXT_PUBLIC_APP_URL=https://invoicecop.com
 CRON_SECRET=                              # Random secret to protect cron endpoint
+
+# Sentry (optional — error monitoring; set DSN from sentry.io project settings)
+NEXT_PUBLIC_SENTRY_DSN=
+# SENTRY_DSN=                             # Optional server-only override
 ```
 
 ---
@@ -224,7 +233,7 @@ create table public.profiles (
   subscription_status text not null default 'trialing'
     check (subscription_status in ('trialing', 'active', 'past_due', 'cancelled')),
   trial_ends_at timestamptz default (now() + interval '14 days'),
-  lemon_squeezy_subscription_id text,
+  dodo_subscription_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -430,7 +439,7 @@ insert into public.email_templates (stage, tone_tag, subject_template, body_temp
 [x] 2.10 Create app/sitemap.ts and app/robots.ts
 [x] 2.11 /privacy and /terms pages (`app/(marketing)/privacy`, `terms`)
 [ ] 2.12 Audit with Lighthouse — target 95+ on all metrics
-[ ] 2.13 Add Vercel Analytics (Phase 11)
+[x] 2.13 Add Vercel Analytics (Phase 11)
 [ ] 2.14 Create OG image (1200×630) — public/og.png
 ```
 
@@ -852,27 +861,27 @@ ${body}`,
 
 ---
 
-## Phase 9 — Billing (Lemon Squeezy)
+## Phase 9 — Billing (Dodo Payments)
 
-**Implemented:** Checkout link with `checkout[custom][user_id]` (`lib/billing/checkout-url.ts`), `POST /api/webhooks/lemonsqueezy` (HMAC via `X-Signature` when `LEMONSQUEEZY_WEBHOOK_SECRET` is set), profile sync (`lib/billing/lemon-squeezy.ts`), `/settings` UI. **`profiles.lemon_squeezy_subscription_id`** stores the LS subscription id.
+**Implemented:** Server-side **checkout session** (`GET /api/billing/dodo-checkout`) using the official [`dodopayments`](https://www.npmjs.com/package/dodopayments) SDK — metadata includes `user_id` for webhook matching. **`POST /api/webhooks/dodo`** verifies [Standard Webhooks](https://www.standardwebhooks.com/) signatures via `DODO_PAYMENTS_WEBHOOK_KEY` and syncs `profiles` from subscription events (`lib/billing/dodo.ts`). **`profiles.dodo_subscription_id`** stores Dodo’s `subscription_id`.
 
 **Current code:** `lib/scheduler/process.ts` skips sends when the owner is not `active` or **valid `trialing`** (`trial_ends_at` in the future).
 
-**Note:** Lemon Squeezy `cancelled` can still be in a grace period until `ends_at`; we currently map LS `cancelled` / `expired` to `cancelled` immediately (strict lock). Refine later if you want access until period end.
+**Note:** Dodo subscription statuses `cancelled` / `expired` map to our `cancelled`. `on_hold` / `failed` → `past_due`.
 
 ### Goals
-- Lemon Squeezy store + subscription product / variant
-- Users open checkout from Settings with `user_id` passed for webhook matching
-- Webhook updates `subscription_status`, `trial_ends_at`, `lemon_squeezy_subscription_id`
+- Dodo merchant account + subscription **product id**
+- Hosted checkout via API-created session; metadata carries `user_id`
+- Webhook updates `subscription_status`, `trial_ends_at`, `dodo_subscription_id`
 
 ### Tasks
 
 ```
-[ ] 9.1  Create Lemon Squeezy store, subscription product, and checkout link
-[x] 9.2  Env: NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL, LEMONSQUEEZY_WEBHOOK_SECRET
-[x] 9.3  Settings page — status, trial date, subscribe CTA (`app/(app)/settings/page.tsx`)
-[x] 9.4  Webhook POST /api/webhooks/lemonsqueezy — subscription_created, subscription_updated, etc.
-[x] 9.5  Map LS `status` → profiles.subscription_status; verify signature
+[ ] 9.1  Create Dodo subscription product; copy product id into env
+[x] 9.2  Env: DODO_PAYMENTS_API_KEY, DODO_PAYMENTS_WEBHOOK_KEY, DODO_PAYMENTS_SUBSCRIPTION_PRODUCT_ID, NEXT_PUBLIC_APP_URL, DODO_PAYMENTS_ENVIRONMENT
+[x] 9.3  Settings page — link to `/api/billing/dodo-checkout` (`app/(app)/settings/page.tsx`)
+[x] 9.4  Webhook POST `/api/webhooks/dodo` — subscription.* events
+[x] 9.5  Map Dodo `status` → profiles.subscription_status; verify webhook signature
 [x] 9.6  Subscription guard in cron (already: trialing + active only)
 [ ] 9.7  In-app banner: "Your trial ends in X days" (optional polish)
 [ ] 9.8  Hard block UI when not entitled (optional; cron already skips sends)
@@ -892,11 +901,13 @@ async function isAccountAllowedToSend(profile: Profile): Promise<boolean> {
 }
 ```
 
-### Dashboard webhook setup
+### Dodo webhook setup
 
-1. Lemon Squeezy → **Settings → Webhooks** → URL: `https://YOUR_DOMAIN/api/webhooks/lemonsqueezy`
-2. Enable at minimum: `subscription_created`, `subscription_updated`, `subscription_expired`, `subscription_cancelled`
-3. Paste the same signing secret as `LEMONSQUEEZY_WEBHOOK_SECRET`
+1. Dodo Dashboard → **Settings → Webhooks** → URL: `https://YOUR_DOMAIN/api/webhooks/dodo`
+2. Subscribe to subscription events (e.g. `subscription.active`, `subscription.updated`, `subscription.cancelled`, `subscription.expired`, `subscription.on_hold`, …).
+3. Set **`DODO_PAYMENTS_WEBHOOK_KEY`** in Vercel to the webhook **secret** from Dodo (used by the SDK’s `unwrap` verifier).
+
+**Docs:** [Subscription integration guide](https://docs.dodopayments.com/api-reference/subscription-integration-guide), [Webhooks](https://docs.dodopayments.com/developer-resources/webhooks).
 
 ---
 
@@ -950,24 +961,24 @@ where owner_id = auth.uid();
 ### Tasks
 
 ```
-[ ] 11.1 Add error boundaries in React — graceful fallback UI for crashes
-[ ] 11.2 Add loading skeletons for dashboard tiles and invoice list
-[ ] 11.3 Add form error messages (Zod validation surface to UI)
-[ ] 11.4 Security: verify all API routes check auth session
-[ ] 11.5 Security: verify all DB operations use authenticated Supabase client (not service role)
-[ ] 11.6 Security: verify webhook endpoints validate signatures (Resend, Lemon Squeezy)
-[ ] 11.7 Security: run Supabase Advisors (Security linter) — fix all warnings
+[x] 11.1 Add error boundaries in React — graceful fallback UI for crashes (`app/(app)/error.tsx`, `app/global-error.tsx`)
+[x] 11.2 Add loading skeletons for dashboard tiles and invoice list (`app/(app)/loading.tsx`, `components/ui/skeleton.tsx`)
+[x] 11.3 Add form error messages (Zod validation surface to UI) — invoice form + template editor
+[x] 11.4 Security: verify all API routes check auth session (audited; `GET /api/invoices/import` now requires auth)
+[x] 11.5 Security: verify all DB operations use authenticated Supabase client (not service role) — user routes use `createClient`; service role only webhooks, cron, unsubscribe
+[x] 11.6 Security: verify webhook endpoints validate signatures (Resend: Svix via `svix` + `RESEND_WEBHOOK_SECRET`; Dodo: Standard Webhooks when `DODO_PAYMENTS_WEBHOOK_KEY` set)
+[ ] 11.7 Security: run Supabase Advisors (Security linter) — fix all warnings (run in Supabase dashboard on your project)
 [ ] 11.8 Email deliverability:
          a. Add SPF record for sending domain
          b. Add DKIM key from Resend
          c. Add DMARC policy (p=none for monitoring initially)
          d. Verify in MXToolbox
-[ ] 11.9 Add unsubscribe link + "If you've already paid, ignore this" to all templates
-[ ] 11.10 Add legal footer to emails: "This is an automated reminder from InvoiceCop..."
+[x] 11.9 Add unsubscribe link + "If you've already paid, ignore this" — `appendReminderEmailFooter` in `lib/email/footer.ts` (all sends); fixed `invoice_id` on unsubscribe URL
+[x] 11.10 Add legal footer to emails — same helper + `lib/email/send.ts`
 [x] 11.11 Create /privacy and /terms pages (basic content)
-[ ] 11.12 Set up Vercel Analytics
-[ ] 11.13 Set up error monitoring (Sentry free tier)
-[ ] 11.14 Write CLAUDE.md with project conventions for future development
+[x] 11.12 Set up Vercel Analytics (`@vercel/analytics` in `app/layout.tsx`)
+[x] 11.13 Set up error monitoring (Sentry free tier) — `instrumentation.ts`, `instrumentation-client.ts`, `sentry.*.config.ts`, `withSentryConfig`; set `NEXT_PUBLIC_SENTRY_DSN`
+[x] 11.14 Write CLAUDE.md with project conventions for future development
 [ ] 11.15 Final Lighthouse audit — fix any regressions
 [ ] 11.16 Smoke test full user journey end-to-end:
           Sign up → Add invoice → Receive reminder email → Mark paid → Sequence cancelled
@@ -980,14 +991,14 @@ where owner_id = auth.uid();
 [ ] All env vars set in Vercel production
 [ ] Supabase production project (not dev) connected
 [ ] Resend domain verified + SPF/DKIM live
-[ ] Lemon Squeezy store live (test vs live mode aligned with app URL)
+[ ] Dodo Payments live mode + credentials aligned with production URL
 [ ] Error monitoring active
 [ ] Backups: Supabase automatic daily backups enabled
 [ ] Rate limiting on AI endpoint
 [ ] Cron jobs verified working in Vercel dashboard
 [ ] Landing page OG image created (1200x630)
 [ ] favicon + app icon set
-[ ] 404 page created
+[x] 404 page created (`app/not-found.tsx`)
 ```
 
 ---

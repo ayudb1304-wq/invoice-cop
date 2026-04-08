@@ -69,6 +69,12 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   // Return CSV template
   const headers = [
     "client_name",

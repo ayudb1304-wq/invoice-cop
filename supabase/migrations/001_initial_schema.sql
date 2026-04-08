@@ -19,7 +19,7 @@ create table public.profiles (
   subscription_status text not null default 'trialing'
     check (subscription_status in ('trialing', 'active', 'past_due', 'cancelled')),
   trial_ends_at timestamptz default (now() + interval '14 days'),
-  lemon_squeezy_subscription_id text,
+  dodo_subscription_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

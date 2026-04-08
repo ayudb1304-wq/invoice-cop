@@ -8,9 +8,9 @@ begin
       and column_name = 'razorpay_subscription_id'
   ) then
     alter table public.profiles
-      rename column razorpay_subscription_id to lemon_squeezy_subscription_id;
+      rename column razorpay_subscription_id to dodo_subscription_id;
   end if;
 end $$;
 
-comment on column public.profiles.lemon_squeezy_subscription_id is
-  'Lemon Squeezy subscription id (string) from webhooks';
+comment on column public.profiles.dodo_subscription_id is
+  'External billing subscription id (legacy migration)';

@@ -74,14 +74,32 @@ export function InvoiceForm({ invoice }: Props) {
         body: JSON.stringify(values),
       });
 
-      const json = await res.json();
+      type ErrJson = { error?: string; issues?: Record<string, string[] | undefined> };
+      type OkJson = { data: { id: string } };
+      const json = (await res.json()) as ErrJson | OkJson;
       if (!res.ok) {
-        toast.error(json.error ?? "Something went wrong");
+        const err = json as ErrJson;
+        if (err.issues && typeof err.issues === "object") {
+          let applied = false;
+          for (const [key, msgs] of Object.entries(err.issues)) {
+            const msg = Array.isArray(msgs) ? msgs[0] : undefined;
+            if (msg) {
+              form.setError(key as keyof InvoiceFormValues, { message: msg });
+              applied = true;
+            }
+          }
+          if (applied) {
+            toast.error("Please fix the highlighted fields.");
+            return;
+          }
+        }
+        toast.error(err.error ?? "Something went wrong");
         return;
       }
 
+      const ok = json as OkJson;
       toast.success(isEdit ? "Invoice updated" : "Invoice created — reminders scheduled");
-      router.push(`/invoices/${json.data.id}`);
+      router.push(`/invoices/${ok.data.id}`);
       router.refresh();
     } finally {
       setSubmitting(false);

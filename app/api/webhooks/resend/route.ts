@@ -1,35 +1,35 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/utils/supabase/server";
 import { logEvent } from "@/lib/db/invoices";
+import { verifyAndParseResendWebhook } from "@/lib/webhooks/verify-resend";
 
-// Resend sends inbound email events as POST to this endpoint.
+// Resend sends inbound email events as POST to this endpoint (Svix-signed).
 // We match the invoice by the reply-to address pattern: reply+{invoiceId}@domain
 export async function POST(request: Request) {
-  const webhookSecret = process.env.RESEND_WEBHOOK_SECRET;
+  const rawBody = await request.text();
 
-  // Verify webhook signature if secret is configured
-  if (webhookSecret) {
-    const signature = request.headers.get("svix-signature") ?? "";
-    if (!signature) {
-      return NextResponse.json({ error: "Missing signature" }, { status: 401 });
-    }
-    // Signature verification can be added here using the Resend webhook library
-    // For MVP we verify by secret presence; full verification in Phase 11
+  let envelope: Record<string, unknown>;
+  try {
+    envelope = verifyAndParseResendWebhook(rawBody, request.headers);
+  } catch {
+    return NextResponse.json({ error: "Invalid webhook signature" }, { status: 401 });
   }
 
-  const body = await request.json();
+  const data = (envelope.data ?? envelope) as {
+    to?: string[];
+    from?: string;
+    subject?: string;
+  };
+
   const supabase = createServiceClient();
 
-  // Extract invoice ID from the "to" address (reply+{invoiceId}@domain)
-  const toAddresses: string[] = body.to ?? [];
+  const toAddresses: string[] = data.to ?? [];
   const invoiceId = extractInvoiceId(toAddresses);
 
   if (!invoiceId) {
-    // Not a reply we can match — ignore
     return NextResponse.json({ ok: true });
   }
 
-  // Pause sequence and log the reply
   const { error } = await supabase
     .from("invoices")
     .update({ sequence_active: false })
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       invoiceId,
       "reply_detected",
       "Client replied — reminder sequence paused automatically",
-      { from: body.from, subject: body.subject }
+      { from: data.from, subject: data.subject }
     );
   }
 

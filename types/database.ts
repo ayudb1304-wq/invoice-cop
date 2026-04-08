@@ -26,7 +26,7 @@ export type Database = {
           avatar_url: string | null;
           subscription_status: SubscriptionStatus;
           trial_ends_at: string | null;
-          lemon_squeezy_subscription_id: string | null;
+          dodo_subscription_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -37,7 +37,7 @@ export type Database = {
           avatar_url?: string | null;
           subscription_status?: SubscriptionStatus;
           trial_ends_at?: string | null;
-          lemon_squeezy_subscription_id?: string | null;
+          dodo_subscription_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -48,7 +48,7 @@ export type Database = {
           avatar_url?: string | null;
           subscription_status?: SubscriptionStatus;
           trial_ends_at?: string | null;
-          lemon_squeezy_subscription_id?: string | null;
+          dodo_subscription_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
